@@ -1,5 +1,5 @@
 .constf myconst(0.0, 1.0, 0.01, 1000.0)
-.constf myconst2(0.25, 0.0, 0.0, 0.0)
+.constf myconst2(0.5, 0.0, 0.0, 0.0)
 .alias zeros myconst.xxxx
 .alias ones myconst.yyyy
 .alias near myconst.zzzz
