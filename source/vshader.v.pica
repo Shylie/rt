@@ -7,7 +7,7 @@
 .alias far myconst.wwww
 .alias noHit myconst2.yyyy
 
-.consti bounceLoopParams(4, 0, 1, 0)
+.consti bounceLoopParams(3, 0, 1, 0)
 .consti calcSphereLoopParams(2, 0, 1, 0)
 
 .setb b0 true
@@ -19,6 +19,9 @@
 
 ; material albedo
 .fvec sphereColors[3]
+
+; random numbers
+.fvec rand[4]
 
 .in inOrigin v0
 .in inLowerLeftCorner v1
@@ -54,6 +57,9 @@
 
 	; calculate light bounces
 	for bounceLoopParams
+		; setup random numbers for this iteration
+		mov r11, rand[aL]
+
 		; reset max ray distance
 		mov r4.w, far
 
@@ -147,7 +153,7 @@
 				rcp r3.w, r3.w
 				mul r7.xyz, r7.xyz, r3.w
 
-				; multiply color by albedo
+				; set albedo
 				mov r10.xyz, sphereColors[aL].xyz
 
 				; early exit label
@@ -165,10 +171,10 @@
 		mul r4.xyz, r4.xyz, r10.xyz
 
 		; set r1 to new ray origin
-		add r1.xyz, r5.xyz, r7.xyz
+		mov r1.xyz, r5.xyz
 
 		; set r2 to new ray direction
-		mov r2.xyz, r7.xyz
+		add r2.xyz, r7.xyz, r11.xyz
 	.end
 
 	noHitLabel:
@@ -181,26 +187,27 @@
 	end
 .end
 
+; Calculate Sphere Intersection
+; -----------------------------
+;
 ; Inputs
 ; ------
-;   r1.xyz:  ray origin
-;   r2.xyz:  ray direction
-;   r3.xyz:  sphere origin
-;	r3.w:    sphere radius
-;   r4.w:    min distance
+;   r1.xyz:   ray origin
+;   r2.xyz:   ray direction
+;   r3.xyz:   sphere origin
+;	r3.w:     sphere radius
+;   r4.w:     min distance
+;   r11.xyzw: random numbers
 ;
 ; Outputs
 ; -------
-;   r4.w:    new min distance
-;   r10.xyz: albedo
+;   r4.w:     new min distance
+;   r10.xyz:  albedo
 ;
 ; Temporaries
 ; -----------
-;   r5.xyz:  new origin
-;   r6.xyz:  new direction
-;   r7.xyz:  hit normal
-;   r8.xyzw: used for calculations
-;   r9.xyzw: used for calculations
-;
-;.proc calcSphere
-;.end
+;   r5.xyz:   new origin
+;   r6.xyz:   new direction
+;   r7.xyz:   hit normal
+;   r8.xyzw:  used for calculations
+;   r9.xyzw:  used for calculations

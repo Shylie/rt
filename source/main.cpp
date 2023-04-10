@@ -13,9 +13,6 @@ GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
 constexpr u32 FRAMEBUFFER_TRANSFER_FLAGS =
 GX_TRANSFER_RAW_COPY(1);
 
-constexpr u32 PREV_FRAME_CLEAR_DATA_SIZE = 240 * 400 * 4;
-u32 PREV_FRAME_CLEAR_DATA[PREV_FRAME_CLEAR_DATA_SIZE];
-
 struct vertex
 {
 	float st[2];
@@ -62,8 +59,9 @@ static DVLB_s* vshaderDVLB;
 static shaderProgram_s program;
 static s8 spheresUniformLocation;
 static s8 sphereColorsUniformLocation;
+static s8 randLocation;
 
-static constexpr unsigned int VERTEX_COUNT_W = 90;
+static constexpr unsigned int VERTEX_COUNT_W = 150;
 static constexpr unsigned int VERTEX_COUNT_H = 10 * VERTEX_COUNT_W / 6;
 static constexpr unsigned int VERTEX_COUNT = VERTEX_COUNT_W * VERTEX_COUNT_H;
 
@@ -87,6 +85,22 @@ static void setupFixed(C3D_FVec lookFrom, C3D_FVec lookAt, C3D_FVec up)
 static float rand01()
 {
 	return static_cast<float>(rand()) / RAND_MAX;
+}
+
+static C3D_FVec randvec()
+{
+	C3D_FVec out;
+	out.w = rand01();
+
+	do
+	{
+		out.x = rand01() * 2 - 1;
+		out.y = rand01() * 2 - 1;
+		out.z = rand01() * 2 - 1;
+	}
+	while (FVec3_Magnitude(out) > 1.0f);
+
+	return out;
 }
 
 static void setupVertices()
@@ -114,15 +128,17 @@ static void setupVertices()
 	}
 
 	memcpy(vboData, vertexList, sizeof(vertexList));
+
+	constexpr int NUM_RAND = 4;
+	C3D_FVec* randPtr = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, randLocation, NUM_RAND);
+	for (int i = 0; i < NUM_RAND; i++)
+	{
+		randPtr[i] = randvec();
+	}
 }
 
 static void sceneInit()
 {
-	for (unsigned int i = 0; i < PREV_FRAME_CLEAR_DATA_SIZE; i++)
-	{
-		PREV_FRAME_CLEAR_DATA[i] = 0xFFFFFFFF;
-	}
-
 	vboData = linearAlloc(sizeof(vertexList));
 
 	unsigned int v = 0;
@@ -146,6 +162,7 @@ static void sceneInit()
 
 	spheresUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "spheres");
 	sphereColorsUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "sphereColors");
+	randLocation = shaderInstanceGetUniformLocation(program.vertexShader, "rand");
 
 	C3D_AttrInfo* attrInfo = C3D_GetAttrInfo();
 	AttrInfo_Init(attrInfo);
@@ -173,13 +190,13 @@ static void sceneInit()
 	constexpr u16 NUM_SPHERES = 3;
 	C3D_FVec* spheres = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, spheresUniformLocation, NUM_SPHERES);
 	spheres[0] = FVec4_New(0.0f, -100.5f, -1.0f, 100.0f);
-	spheres[1] = FVec4_New(0.5f, 0.0f, -1.0f, 0.5f);
-	spheres[2] = FVec4_New(-0.5f, 0.0f, -1.0f, 0.5f);
+	spheres[1] = FVec4_New(0.6f, 0.0f, -1.0f, 0.5f);
+	spheres[2] = FVec4_New(-0.6f, 0.0f, -1.0f, 0.5f);
 
 	C3D_FVec* sphereColors = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, sphereColorsUniformLocation, NUM_SPHERES);
-	sphereColors[0] = FVec3_New(0.7f, 0.3f, 0.3f);
-	sphereColors[1] = FVec3_New(0.3f, 0.7f, 0.3f);
-	sphereColors[2] = FVec3_New(0.3f, 0.3f, 0.7f);
+	sphereColors[0] = FVec3_New(0.9f, 0.3f, 0.3f);
+	sphereColors[1] = FVec3_New(0.3f, 0.9f, 0.3f);
+	sphereColors[2] = FVec3_New(0.3f, 0.3f, 0.9f);
 }
 
 static void sceneRender()
@@ -328,6 +345,7 @@ int main(int argc, char* argv[])
 	sceneExit();
 
 	C3D_TexDelete(&prevFrame);
+	C3D_RenderTargetDelete(target);
 
 	C3D_Fini();
 	gfxExit();
