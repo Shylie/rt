@@ -1,6 +1,8 @@
 #include <3ds.h>
 #include <citro3d.h>
 
+#include <cstdlib>
+
 #include "vshader_shbin.h"
 
 constexpr u32 DISPLAY_TRANSFER_FLAGS =
@@ -8,12 +10,17 @@ GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) |
 GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB8) |
 GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
 
-constexpr u32 CLEAR_COLOR = 0;
+constexpr u32 FRAMEBUFFER_TRANSFER_FLAGS =
+GX_TRANSFER_RAW_COPY(1);
+
+constexpr u32 PREV_FRAME_CLEAR_DATA_SIZE = 240 * 400 * 4;
+u32 PREV_FRAME_CLEAR_DATA[PREV_FRAME_CLEAR_DATA_SIZE];
 
 struct vertex
 {
-	float direction[3];
+	float st[2];
 	float coords[3];
+	float uv[2];
 };
 
 class camera
@@ -36,20 +43,12 @@ public:
 		lowerLeftCorner = FVec3_Subtract(FVec3_Add(FVec3_Scale(horizontal, -0.5f), FVec3_Scale(vertical, -0.5f)), w);
 	}
 
-	C3D_FVec getOrigin() const
+	void setupFixed() const
 	{
-		return origin;
-	}
-
-	void setupVertices(vertex* vs, const unsigned int w, const unsigned int h) const
-	{
-		for (unsigned int x = 0; x < w; x++)
-		{
-			for (unsigned int y = 0; y < h; y++)
-			{
-				getRay(vs[x + y * w], static_cast<float>(x) / (w - 1), static_cast<float>(y) / (h - 1));
-			}
-		}
+		*C3D_FixedAttribGetWritePtr(0) = origin;
+		*C3D_FixedAttribGetWritePtr(1) = lowerLeftCorner;
+		*C3D_FixedAttribGetWritePtr(2) = horizontal;
+		*C3D_FixedAttribGetWritePtr(3) = vertical;
 	}
 
 private:
@@ -57,19 +56,6 @@ private:
 	C3D_FVec lowerLeftCorner;
 	C3D_FVec horizontal;
 	C3D_FVec vertical;
-
-	void getRay(vertex& v, const float s, const float t) const
-	{
-		const C3D_FVec dir = FVec3_Add(lowerLeftCorner, FVec3_Add(FVec3_Scale(horizontal, t), FVec3_Scale(vertical, s)));
-
-		v.direction[0] = dir.x;
-		v.direction[1] = dir.y;
-		v.direction[2] = dir.z;
-
-		v.coords[0] = 2.0f * s - 1.0f;
-		v.coords[1] = 2.0f * t - 1.0f;
-		v.coords[2] = -0.5f;
-	}
 };
 
 static DVLB_s* vshaderDVLB;
@@ -77,7 +63,7 @@ static shaderProgram_s program;
 static s8 spheresUniformLocation;
 
 static constexpr unsigned int VERTEX_COUNT_W = 150;
-static constexpr unsigned int VERTEX_COUNT_H = 250;
+static constexpr unsigned int VERTEX_COUNT_H = 10 * VERTEX_COUNT_W / 6;
 static constexpr unsigned int VERTEX_COUNT = VERTEX_COUNT_W * VERTEX_COUNT_H;
 
 static vertex vertexList[VERTEX_COUNT];
@@ -86,25 +72,57 @@ static u16 vertexIndices[VERTEX_COUNT * 2 + VERTEX_COUNT_H * 2];
 static void* vboData;
 static void* iboData;
 
-static void setupVertices(C3D_FVec lookFrom, C3D_FVec lookAt, C3D_FVec up)
+static C3D_Tex prevFrame;
+
+static void setupFixed(C3D_FVec lookFrom, C3D_FVec lookAt, C3D_FVec up)
 {
 	constexpr float VFOV = 90;
 	constexpr float ASPECT_RATIO = 400.0f / 240.0f;
 
 	camera cam(lookFrom, lookAt, up, VFOV, ASPECT_RATIO);
-	cam.setupVertices(vertexList, VERTEX_COUNT_W, VERTEX_COUNT_H);
+	cam.setupFixed();
+}
 
-	*C3D_FixedAttribGetWritePtr(0) = cam.getOrigin();
+static float rand01()
+{
+	return static_cast<float>(rand()) / RAND_MAX;
+}
+
+static void setupVertices()
+{
+	for (unsigned int x = 0; x < VERTEX_COUNT_W; x++)
+	{
+		for (unsigned int y = 0; y < VERTEX_COUNT_H; y++)
+		{
+			vertex& v = vertexList[x + y * VERTEX_COUNT_W];
+
+			const float s = static_cast<float>(x + rand01()) / VERTEX_COUNT_W;
+			const float t = static_cast<float>(y + rand01()) / VERTEX_COUNT_H;
+
+			// swapped due to 3DS screen orientation
+			v.st[0] = t;
+			v.st[1] = s;
+
+			v.coords[0] = 2.0f * s - 1.0f;
+			v.coords[1] = 2.0f * t - 1.0f;
+			v.coords[2] = -0.5f;
+
+			v.uv[0] = s * (240.0f / 256.0f);
+			v.uv[1] = t * (400.0f / 512.0f);
+		}
+	}
 
 	memcpy(vboData, vertexList, sizeof(vertexList));
 }
 
 static void sceneInit()
 {
-	vboData = linearAlloc(sizeof(vertexList));
-	camera cam(FVec3_New(0, 0.25f, 0), FVec3_New(0, 0, -1), FVec3_New(0, 1, 0), 90, 400.0f / 240.0f);
+	for (unsigned int i = 0; i < PREV_FRAME_CLEAR_DATA_SIZE; i++)
+	{
+		PREV_FRAME_CLEAR_DATA[i] = 0xFFFFFFFF;
+	}
 
-	cam.setupVertices(vertexList, VERTEX_COUNT_W, VERTEX_COUNT_H);
+	vboData = linearAlloc(sizeof(vertexList));
 
 	unsigned int v = 0;
 	for (unsigned int y = 0; y < VERTEX_COUNT_H; y++)
@@ -130,20 +148,25 @@ static void sceneInit()
 	C3D_AttrInfo* attrInfo = C3D_GetAttrInfo();
 	AttrInfo_Init(attrInfo);
 	AttrInfo_AddFixed(attrInfo, 0);
-	AttrInfo_AddLoader(attrInfo, 1, GPU_FLOAT, 3);
-	AttrInfo_AddLoader(attrInfo, 2, GPU_FLOAT, 3);
+	AttrInfo_AddFixed(attrInfo, 1);
+	AttrInfo_AddFixed(attrInfo, 2);
+	AttrInfo_AddFixed(attrInfo, 3);
+	AttrInfo_AddLoader(attrInfo, 4, GPU_FLOAT, 2);
+	AttrInfo_AddLoader(attrInfo, 5, GPU_FLOAT, 3);
+	AttrInfo_AddLoader(attrInfo, 6, GPU_FLOAT, 2);
 
 	iboData = linearAlloc(sizeof(vertexIndices));
 	memcpy(iboData, vertexIndices, sizeof(vertexIndices));
 
 	C3D_BufInfo* bufInfo = C3D_GetBufInfo();
 	BufInfo_Init(bufInfo);
-	BufInfo_Add(bufInfo, vboData, sizeof(vertex), 2, 0x21);
+	BufInfo_Add(bufInfo, vboData, sizeof(vertex), 3, 0x654);
 
 	C3D_TexEnv* env = C3D_GetTexEnv(0);
 	C3D_TexEnvInit(env);
-	C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR);
-	C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+	C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR, GPU_TEXTURE0, GPU_CONSTANT);
+	C3D_TexEnvFunc(env, C3D_RGB, GPU_INTERPOLATE);
+	C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
 
 	C3D_FVec* spheres = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, spheresUniformLocation, 3);
 	spheres[0] = FVec4_New(0.0f, -100.5f, -1.0f, 100.0f);
@@ -165,6 +188,31 @@ static void sceneExit()
 	DVLB_Free(vshaderDVLB);
 }
 
+static float clamp(float t, float min, float max)
+{
+	return t < min ? min : (t > max ? max : t);
+}
+
+static u32 shift(u8 value, u32 amt)
+{
+	return static_cast<u32>(value) << amt;
+}
+
+static u32 getFrameNumColor(unsigned int frameNum)
+{
+	if (frameNum == 0)
+	{
+		return 0xFFFFFFFF;
+	}
+	else
+	{
+		const float ratio = 1 - static_cast<float>(frameNum) / (frameNum + 1);
+		const float scaledRatio = clamp(255.0f * ratio, 0.0f, 255.0f);
+		const u8 bits = static_cast<u8>(scaledRatio);
+		return shift(bits, 24) | shift(bits, 16) | shift(bits, 8) | bits;
+	}
+}
+
 int main(int argc, char* argv[])
 {
 	gfxInitDefault();
@@ -172,6 +220,9 @@ int main(int argc, char* argv[])
 
 	C3D_RenderTarget* target = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
 	C3D_RenderTargetSetOutput(target, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
+	
+	C3D_TexInit(&prevFrame, 256, 512, GPU_RGBA8);
+	C3D_TexBind(0, &prevFrame);
 
 	sceneInit();
 
@@ -180,7 +231,9 @@ int main(int argc, char* argv[])
 	C3D_FVec vup = FVec3_New(0, 1.0f, 0);
 	bool dirty = false;
 
-	setupVertices(lookFrom, lookAt, vup);
+	setupFixed(lookFrom, lookAt, vup);
+
+	unsigned int frameNum = 0;
 
 	// Main loop
 	while (aptMainLoop())
@@ -193,7 +246,7 @@ int main(int argc, char* argv[])
 			break; // break in order to return to hbmenu
 		}
 
-		constexpr float MOVE_RATE = 1.0f / 60.0f;
+		constexpr float MOVE_RATE = 1.0f / 30.0f;
 
 		C3D_FVec diff = FVec3_New(0, 0, 0);
 		if (kDown & KEY_DLEFT)
@@ -237,20 +290,36 @@ int main(int argc, char* argv[])
 
 		if (dirty)
 		{
-			setupVertices(lookFrom, lookAt, vup);
+			setupFixed(lookFrom, lookAt, vup);
+
+			frameNum = 0;
+
 			dirty = false;
 		}
 
+		setupVertices();
+
+		C3D_TexEnvColor(C3D_GetTexEnv(0), getFrameNumColor(frameNum));
+
 		if (C3D_FrameBegin(C3D_FRAME_SYNCDRAW))
 		{
-			C3D_RenderTargetClear(target, C3D_CLEAR_ALL, CLEAR_COLOR, 0);
+			C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0, 0);
 			C3D_FrameDrawOn(target);
 			sceneRender();
 			C3D_FrameEnd(0);
+			C3D_SyncTextureCopy(
+				(u32*)target->frameBuf.colorBuf, GX_BUFFER_DIM((240 * 8 * 4) >> 4, 0),
+				(u32*)prevFrame.data + (512 - 400) * 256, GX_BUFFER_DIM((240 * 8 * 4) >> 4, ((256 - 240) * 8 * 4) >> 4),
+				240 * 400 * 4, FRAMEBUFFER_TRANSFER_FLAGS
+			);
 		}
+
+		frameNum++;
 	}
 
 	sceneExit();
+
+	C3D_TexDelete(&prevFrame);
 
 	C3D_Fini();
 	gfxExit();

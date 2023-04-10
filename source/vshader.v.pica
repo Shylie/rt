@@ -19,21 +19,32 @@
 .fvec spheres[3]
 
 .in inOrigin v0
-.in inDirection v1
-.in inPos v2
+.in inLowerLeftCorner v1
+.in inHorizontal v2
+.in inVertical v3
+.in inST v4
+.in inPos v5
+.in inUV v6
 
 .out outPos position
+.out outUV texcoord0
 .out outColor color
 
 .proc main
 	; outPos = inPos
 	mov outPos, inPos
 
+	; outUV = inUV
+	mov outUV, inUV
+
 	; r1 = inOrigin
 	mov r1, inOrigin
 
 	; r2 = inDirection
-	mov r2, inDirection
+	mov r2.xyz, inLowerLeftCorner
+	mov r3.xy, inST.xy
+	mad r2.xyz, inHorizontal, r3.x, r2.xyz
+	mad r2.xyz, inVertical, r3.y, r2.xyz
 
 	; calculate light bounces
 	for bounceLoopParams
