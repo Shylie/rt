@@ -1,14 +1,13 @@
 .constf myconst(0.0, 1.0, 0.01, 1000.0)
-.constf myconst2(0.5, 0.0, 0.0, 0.0)
+.constf myconst2(0.5, 999.0, 0.0, 0.0)
 .alias zeros myconst.xxxx
+.alias halfs myconst2.xxxx
 .alias ones myconst.yyyy
 .alias near myconst.zzzz
 .alias far myconst.wwww
-.alias defaultMissColor myconst.xxxy
-.alias defaultHitColor myconst.yxxy
-.alias halfs myconst2.xxxx
+.alias noHit myconst2.yyyy
 
-.consti bounceLoopParams(0, 0, 1, 0)
+.consti bounceLoopParams(4, 0, 1, 0)
 .consti calcSphereLoopParams(2, 0, 1, 0)
 
 .setb b0 true
@@ -17,6 +16,9 @@
 ; xyz center (in world space)
 ; w radius (in world space)
 .fvec spheres[3]
+
+; material albedo
+.fvec sphereColors[3]
 
 .in inOrigin v0
 .in inLowerLeftCorner v1
@@ -46,10 +48,17 @@
 	mad r2.xyz, inHorizontal, r3.x, r2.xyz
 	mad r2.xyz, inVertical, r3.y, r2.xyz
 
+	; set initial color to (1, 1, 1)
+	; as lights are not implemented yet
+	mov r4.xyz, ones
+
 	; calculate light bounces
 	for bounceLoopParams
-		; r4 = (0, 0, 0, far)
-		mov r4, myconst.xxxw
+		; reset max ray distance
+		mov r4.w, far
+
+		; set albedo to a large number for sphere hit check
+		mov r10.xyz, far
 
 		; for each sphere
 		for calcSphereLoopParams
@@ -138,17 +147,31 @@
 				rcp r3.w, r3.w
 				mul r7.xyz, r7.xyz, r3.w
 
-				; assign color
-				mov r4.xyz, r7.xyz
-				add r4.xyz, ones, r4.xyz
-				mul r4.xyz, halfs, r4.xyz
+				; multiply color by albedo
+				mov r10.xyz, sphereColors[aL].xyz
 
 				; early exit label
 				calcSphereExit:
 				nop
 			; done with calculation
 		.end
+
+		; check if noHit > albedo
+		cmp noHit.xyz, le, le, r10.xyz
+		breakc cmp.x
+		jmpc cmp.x, noHitLabel
+
+		; multiply color by albedo
+		mul r4.xyz, r4.xyz, r10.xyz
+
+		; set r1 to new ray origin
+		add r1.xyz, r5.xyz, r7.xyz
+
+		; set r2 to new ray direction
+		mov r2.xyz, r7.xyz
 	.end
+
+	noHitLabel:
 
 	; copy final color to output
 	mov outColor.xyz, r4.xyz
@@ -160,23 +183,24 @@
 
 ; Inputs
 ; ------
-;   r1.xyz: ray origin
-;   r2.xyz: ray direction
-;   r3.xyzw: sphere info
-;   r4.w: min distance
+;   r1.xyz:  ray origin
+;   r2.xyz:  ray direction
+;   r3.xyz:  sphere origin
+;	r3.w:    sphere radius
+;   r4.w:    min distance
 ;
 ; Outputs
 ; -------
-;   r4.w: new min distance
-;   r4.xyz: new color
+;   r4.w:    new min distance
+;   r10.xyz: albedo
 ;
 ; Temporaries
 ; -----------
-;   r5.xyz: new origin
-;   r6.xyz: new direction
-;   r7.xyz: hit normal
-;   r8
-;   r9
+;   r5.xyz:  new origin
+;   r6.xyz:  new direction
+;   r7.xyz:  hit normal
+;   r8.xyzw: used for calculations
+;   r9.xyzw: used for calculations
 ;
 ;.proc calcSphere
 ;.end
