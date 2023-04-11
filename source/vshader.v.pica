@@ -7,21 +7,24 @@
 .alias far myconst.wwww
 .alias noHit myconst2.yyyy
 
-.consti bounceLoopParams(3, 0, 1, 0)
-.consti calcSphereLoopParams(2, 0, 1, 0)
+.consti bounceLoopParams(9, 0, 1, 0)
+.consti calcSphereLoopParams(3, 0, 1, 0)
 
 .setb b0 true
 .alias true b0
 
 ; xyz center (in world space)
 ; w radius (in world space)
-.fvec spheres[3]
+.fvec spheres[4]
 
 ; material albedo
-.fvec sphereColors[3]
+.fvec sphereColors[4]
+
+; material emitted light
+.fvec sphereLights[4]
 
 ; random numbers
-.fvec rand[4]
+.fvec rand[10]
 
 .in inOrigin v0
 .in inLowerLeftCorner v1
@@ -51,9 +54,11 @@
 	mad r2.xyz, inHorizontal, r3.x, r2.xyz
 	mad r2.xyz, inVertical, r3.y, r2.xyz
 
-	; set initial color to (1, 1, 1)
-	; as lights are not implemented yet
+	; set initial color multiplier to (1, 1, 1)
 	mov r4.xyz, ones
+
+	; set initial color to (0, 0, 0)
+	mov r13.xyz, zeros
 
 	; calculate light bounces
 	for bounceLoopParams
@@ -156,19 +161,23 @@
 				; set albedo
 				mov r10.xyz, sphereColors[aL].xyz
 
+				; set light emitted
+				mov r12.xyz, sphereLights[aL].xyz
+
 				; early exit label
 				calcSphereExit:
 				nop
 			; done with calculation
 		.end
 
-		; check if noHit > albedo
-		cmp noHit.xyz, le, le, r10.xyz
+		; check if noHit < albedo
+		cmp noHit.xyz, lt, lt, r10.xyz
 		breakc cmp.x
-		jmpc cmp.x, noHitLabel
 
 		; multiply color by albedo
 		mul r4.xyz, r4.xyz, r10.xyz
+
+		mad r13.xyz, r4.xyz, r12.xyz, r13.xyz
 
 		; set r1 to new ray origin
 		mov r1.xyz, r5.xyz
@@ -177,10 +186,10 @@
 		add r2.xyz, r7.xyz, r11.xyz
 	.end
 
-	noHitLabel:
-
 	; copy final color to output
-	mov outColor.xyz, r4.xyz
+	; min r13.xyz, ones, r13.xyz
+	mov outColor.xyz, r13.xyz
+
 	; set alpha to 1
 	mov outColor.w, ones
 
@@ -197,12 +206,14 @@
 ;   r3.xyz:   sphere origin
 ;	r3.w:     sphere radius
 ;   r4.w:     min distance
-;   r11.xyzw: random numbers
+;   r11.xyz:  random unit vector
+;   r11.w:    random number
 ;
 ; Outputs
 ; -------
 ;   r4.w:     new min distance
 ;   r10.xyz:  albedo
+;   r12.xyz:  light emitted
 ;
 ; Temporaries
 ; -----------
