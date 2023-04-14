@@ -77,117 +77,32 @@
 			mov r3, spheres[aL]
 			
 			; do calculation
-			; call calcSphere
-				; vec3 oc = origin - center
-				add r8.xyz, r1.xyz, -r3.xyz
-
-				; float a = dot(direction, direction)
-				dp3 r9.x, r2.xyz, r2.xyz
-
-				; float halfB = dot(oc, direction)
-				dp3 r9.y, r8.xyz, r2.xyz
-
-				; float radiusSquared = radius * radius
-				mul r8.w, r3.w, r3.w
-
-				; float c = dot(oc, oc) - radius * radius
-				dp3 r9.z, r8.xyz, r8.xyz
-				add r9.z, r9.z, -r8.w
-
-				; float halfBSquared = halfB * halfB;
-				mul r8.w, r9.y, r9.y
-
-				; float ac = a * c;
-				mul r9.w, r9.x, r9.z
-
-				; float discriminant = bSquared - ac
-				add r8.w, r8.w, -r9.w
-
-				; if discriminant < 0, exit procedure early
-				cmp zeros, gt, gt, r8.w
-				jmpc cmp.x, calcSphereExit
-
-				; calculate t
-				; float sqrtDiscriminant = sqrt(discriminant)
-				rsq r8.w, r8.w
-				rcp r8.w, r8.w
-
-				; a = 1 / a
-				rcp r9.x, r9.x
-
-				; float root = (-halfB - sqrtDiscriminant) / a
-				add r9.z, -r9.y, -r8.w
-				mul r9.z, r9.z, r9.x
-				
-				; if root < min distance, check other root
-				cmp near, gt, gt, r9.z
-				jmpc cmp.x, calcSphereCheckOtherRoot
-
-				; if root > max distance, check other root
-				cmp r9.z, gt, gt, r4.w
-				jmpc cmp.x, calcSphereCheckOtherRoot
-				
-				; if root is in range, finalize calculations
-				jmpu true, calcSphereFin
-
-				calcSphereCheckOtherRoot:
-				
-				; float root = (-halfB + sqrtDiscriminant) / a
-				add r9.z, -r9.y, r8.w
-				mul r9.z, r9.z, r9.x
-				
-				; if root < min distance, check other root
-				cmp near, gt, gt, r9.z
-				jmpc cmp.x, calcSphereExit
-
-				; if root > max distance, check other root
-				cmp r9.z, gt, gt, r4.w
-				jmpc cmp.x, calcSphereExit
-
-				calcSphereFin:
-
-				; change max distance to closest hit
-				mov r4.w, r9.z
-
-				; calculate new origin
-				mul r5.xyz, r2.xyz, r9.zzz
-				add r5.xyz, r5.xyz, r1.xyz
-
-				; calculate normal
-				add r7.xyz, r5.xyz, -r3.xyz
-				rcp r3.w, r3.w
-				mul r7.xyz, r7.xyz, r3.w
-
-				; set albedo
-				mov r10.xyz, sphereColors[aL].xyz
-
-				; set light emitted
-				mov r12.xyz, sphereLights[aL].xyz
-
-				; early exit label
-				calcSphereExit:
-				nop
-			; done with calculation
+			call calcSphere
 		.end
 
 		; check if noHit < albedo
+		; and exit early if true
+		; as albedo has not been set
+		; after the initial set
+		; which only happens when
+		; a ray does not hit any spheres
 		cmp noHit.xyz, lt, lt, r10.xyz
 		breakc cmp.x
 
 		; multiply color by albedo
 		mul r4.xyz, r4.xyz, r10.xyz
 
+		; add emitted light
 		mad r13.xyz, r4.xyz, r12.xyz, r13.xyz
 
 		; set r1 to new ray origin
 		mov r1.xyz, r5.xyz
 
 		; set r2 to new ray direction
-		add r2.xyz, r7.xyz, r11.xyz
+		call diffuse
 	.end
 
 	; copy final color to output
-	; min r13.xyz, ones, r13.xyz
 	mov outColor.xyz, r13.xyz
 
 	; set alpha to 1
@@ -222,3 +137,99 @@
 ;   r7.xyz:   hit normal
 ;   r8.xyzw:  used for calculations
 ;   r9.xyzw:  used for calculations
+
+.proc calcSphere
+	; vec3 oc = origin - center
+	add r8.xyz, r1.xyz, -r3.xyz
+
+	; float a = dot(direction, direction)
+	dp3 r9.x, r2.xyz, r2.xyz
+
+	; float halfB = dot(oc, direction)
+	dp3 r9.y, r8.xyz, r2.xyz
+
+	; float radiusSquared = radius * radius
+	mul r8.w, r3.w, r3.w
+
+	; float c = dot(oc, oc) - radius * radius
+	dp3 r9.z, r8.xyz, r8.xyz
+	add r9.z, r9.z, -r8.w
+
+	; float halfBSquared = halfB * halfB;
+	mul r8.w, r9.y, r9.y
+
+	; float ac = a * c;
+	mul r9.w, r9.x, r9.z
+
+	; float discriminant = bSquared - ac
+	add r8.w, r8.w, -r9.w
+
+	; if discriminant < 0, exit procedure early
+	cmp zeros, gt, gt, r8.w
+	jmpc cmp.x, calcSphereExit
+
+	; calculate t
+	; float sqrtDiscriminant = sqrt(discriminant)
+	rsq r8.w, r8.w
+	rcp r8.w, r8.w
+
+	; a = 1 / a
+	rcp r9.x, r9.x
+
+	; float root = (-halfB - sqrtDiscriminant) / a
+	add r9.z, -r9.y, -r8.w
+	mul r9.z, r9.z, r9.x
+
+	; if root < min distance, check other root
+	cmp near, gt, gt, r9.z
+	jmpc cmp.x, calcSphereCheckOtherRoot
+
+	; if root > max distance, check other root
+	cmp r9.z, gt, gt, r4.w
+	jmpc cmp.x, calcSphereCheckOtherRoot
+
+	; if root is in range, finalize calculations
+	jmpu true, calcSphereFin
+
+	calcSphereCheckOtherRoot:
+
+	; float root = (-halfB + sqrtDiscriminant) / a
+	add r9.z, -r9.y, r8.w
+	mul r9.z, r9.z, r9.x
+
+	; if root < min distance, check other root
+	cmp near, gt, gt, r9.z
+	jmpc cmp.x, calcSphereExit
+
+	; if root > max distance, check other root
+	cmp r9.z, gt, gt, r4.w
+	jmpc cmp.x, calcSphereExit
+
+	calcSphereFin:
+
+	; change max distance to closest hit
+	mov r4.w, r9.z
+
+	; calculate new origin
+	mul r5.xyz, r2.xyz, r9.zzz
+	add r5.xyz, r5.xyz, r1.xyz
+
+	; calculate normal
+	add r7.xyz, r5.xyz, -r3.xyz
+	rcp r3.w, r3.w
+	mul r7.xyz, r7.xyz, r3.w
+
+	; set albedo
+	mov r10.xyz, sphereColors[aL].xyz
+
+	; set light emitted
+	mov r12.xyz, sphereLights[aL].xyz
+
+	; early exit label
+	calcSphereExit:
+	nop
+.end
+
+.proc diffuse
+	add r2.xyz, r7.xyz, r11.xyz
+.end

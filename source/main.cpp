@@ -62,7 +62,7 @@ static s8 sphereColorsUniformLocation;
 static s8 sphereLightsUniformLocation;
 static s8 randUniformLocation;
 
-static constexpr unsigned int VERTEX_COUNT_W = 210;
+static constexpr unsigned int VERTEX_COUNT_W = 150;
 static constexpr unsigned int VERTEX_COUNT_H = 10 * VERTEX_COUNT_W / 6;
 static constexpr unsigned int VERTEX_COUNT = VERTEX_COUNT_W * VERTEX_COUNT_H;
 
@@ -197,7 +197,7 @@ static void sceneInit()
 	spheres[0] = FVec4_New(0.0f, -100.5f, -1.0f, 100.0f);
 	spheres[1] = FVec4_New(0.6f, 0.0f, -1.0f, 0.5f);
 	spheres[2] = FVec4_New(-0.6f, 0.0f, -1.0f, 0.5f);
-	spheres[3] = FVec4_New(0.0f, 1.75f, -1.0f, 1.0f);
+	spheres[3] = FVec4_New(0.0f, 10.0f, -1.0f, 9.0f);
 
 	C3D_FVec* sphereColors = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, sphereColorsUniformLocation, NUM_SPHERES);
 	sphereColors[0] = FVec3_New(0.9f, 0.3f, 0.3f);
