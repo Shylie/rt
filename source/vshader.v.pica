@@ -1,11 +1,13 @@
-.constf myconst(0.0, 1.0, 0.01, 1000.0)
-.constf myconst2(0.5, 999.0, 0.0, 0.0)
+.constf myconst(0.0, 1.0, 0.001, 1000.0)
+.constf myconst2(0.5, 999.0, 1.1, 0.0)
 .alias zeros myconst.xxxx
 .alias halfs myconst2.xxxx
 .alias ones myconst.yyyy
-.alias near myconst.zzzz
+.alias tooclose myconst.zzzz
 .alias far myconst.wwww
 .alias noHit myconst2.yyyy
+.alias defaultDist myconst.wxxx
+.alias nearplane myconst2.zzzz
 
 .consti bounceLoopParams(9, 0, 1, 0)
 .consti calcSphereLoopParams(3, 0, 1, 0)
@@ -26,6 +28,9 @@
 ; random numbers
 .fvec rand[10]
 
+; stereoscopic 3d shift
+.fvec shift
+
 .in inOrigin v0
 .in inLowerLeftCorner v1
 .in inHorizontal v2
@@ -39,12 +44,6 @@
 .out outColor color
 
 .proc main
-	; outPos = inPos
-	mov outPos, inPos
-
-	; outUV = inUV
-	mov outUV, inUV
-
 	; r1 = inOrigin
 	mov r1, inOrigin
 
@@ -59,6 +58,9 @@
 
 	; set initial color to (0, 0, 0)
 	mov r13.xyz, zeros
+
+	; set initial hit location to (far, far, far)
+	mov r15.y, far
 
 	; calculate light bounces
 	for bounceLoopParams
@@ -87,7 +89,8 @@
 		; which only happens when
 		; a ray does not hit any spheres
 		cmp noHit.xyz, lt, lt, r10.xyz
-		breakc cmp.x
+		;breakc cmp.x
+		jmpc cmp.x, labl
 
 		; multiply color by albedo
 		mul r4.xyz, r4.xyz, r10.xyz
@@ -100,13 +103,46 @@
 
 		; set r2 to new ray direction
 		call diffuse
+
+		; update distance if not set
+		cmp noHit, le, le, r15.y
+		ifc cmp.x
+			mov r15.y, r4.w
+		.end
 	.end
+
+	labl:
 
 	; copy final color to output
 	mov outColor.xyz, r13.xyz
 
 	; set alpha to 1
 	mov outColor.w, ones
+	
+	; set distance
+	cmp noHit, le, le, r15.y
+	ifc cmp.x
+		; to (0, 0, 0, 0) since there was no hit
+		mov r15, zeros
+	.end
+
+	; clamp r15.y to [nearplane, far]
+	max r15.y, nearplane, r15.y
+	min r15.y, far, r15.y
+
+	; invert ordering for z-depth
+	rcp r15.z, -r15.y
+
+	; multiply distance by shift
+	mul r15.y, shift.x, r15.y
+
+	; outPos = inPos + shift
+	add outPos, inPos, r15
+	
+	; assign uv coordinates
+	mul r15, shift.z, r15
+	mul r15, halfs, r15
+	add outUV, inUV, r15
 
 	end
 .end
@@ -181,7 +217,7 @@
 	mul r9.z, r9.z, r9.x
 
 	; if root < min distance, check other root
-	cmp near, gt, gt, r9.z
+	cmp tooclose, gt, gt, r9.z
 	jmpc cmp.x, calcSphereCheckOtherRoot
 
 	; if root > max distance, check other root
@@ -198,7 +234,7 @@
 	mul r9.z, r9.z, r9.x
 
 	; if root < min distance, check other root
-	cmp near, gt, gt, r9.z
+	cmp tooclose, gt, gt, r9.z
 	jmpc cmp.x, calcSphereExit
 
 	; if root > max distance, check other root
@@ -211,8 +247,7 @@
 	mov r4.w, r9.z
 
 	; calculate new origin
-	mul r5.xyz, r2.xyz, r9.zzz
-	add r5.xyz, r5.xyz, r1.xyz
+	mad r5.xyz, r2.xyz, r9.zzz, r1.xyz
 
 	; calculate normal
 	add r7.xyz, r5.xyz, -r3.xyz

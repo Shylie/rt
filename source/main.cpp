@@ -20,24 +20,50 @@ struct vertex
 	float uv[2];
 };
 
+static DVLB_s* vshaderDVLB;
+static shaderProgram_s program;
+static s8 spheresUniformLocation;
+static s8 sphereColorsUniformLocation;
+static s8 sphereLightsUniformLocation;
+static s8 randUniformLocation;
+static s8 shiftUniformLocation;
+
+static constexpr unsigned int VERTEX_COUNT_W = 120;
+static constexpr unsigned int VERTEX_COUNT_H = 10 * VERTEX_COUNT_W / 6;
+static constexpr unsigned int VERTEX_COUNT = VERTEX_COUNT_W * VERTEX_COUNT_H;
+
+static vertex vertexList[VERTEX_COUNT];
+static u16 vertexIndices[VERTEX_COUNT * 2 + VERTEX_COUNT_H * 2];
+
+static void* vboData;
+static void* iboData;
+
+static C3D_Tex prevFrameLeft;
+static C3D_Tex prevFrameRight;
+
 class camera
 {
 public:
-	camera(const C3D_FVec lookfrom, const C3D_FVec lookat, const C3D_FVec vup, const float vfov, const float aspectRatio)
+	camera(const C3D_FVec lookfrom, const C3D_FVec lookat, const C3D_FVec vup, const float vfov, const float aspectRatio, const float iod)
 	{
 		const float theta = C3D_AngleFromDegrees(vfov);
 		const float h = tanf(theta / 2.0f);
 		const float viewportHeight = 2.0f * h;
 		const float viewportWidth = aspectRatio * viewportHeight;
+		const float screen = FVec3_Distance(lookfrom, lookat) / 2.0f;
+		shift = iod / (-400.0f * screen * viewportWidth);
 
 		const C3D_FVec w = FVec3_Normalize(FVec3_Subtract(lookfrom, lookat));
 		const C3D_FVec u = FVec3_Normalize(FVec3_Cross(vup, w));
 		const C3D_FVec v = FVec3_Cross(w, u);
 
-		origin = lookfrom;
+		origin = FVec3_Add(lookfrom, FVec3_New(-iod / 3.0f, 0, 0));
 		horizontal = FVec3_Scale(u, viewportWidth);
 		vertical = FVec3_Scale(v, viewportHeight);
-		lowerLeftCorner = FVec3_Subtract(FVec3_Add(FVec3_Scale(horizontal, -0.5f), FVec3_Scale(vertical, -0.5f)), w);
+		lowerLeftCorner = FVec3_Add(
+			FVec3_Subtract(FVec3_Add(FVec3_Scale(horizontal, -0.5f), FVec3_Scale(vertical, -0.5f)), w),
+			FVec3_New(-iod / 3.0f, 0, 0)
+		);
 	}
 
 	void setupFixed() const
@@ -48,39 +74,27 @@ public:
 		*C3D_FixedAttribGetWritePtr(3) = vertical;
 	}
 
+	void setupUniform() const
+	{
+		C3D_FVUnifSet(GPU_VERTEX_SHADER, shiftUniformLocation, shift / 200.0f, 240.0f / 256.0f, 400.0f / 512.0f, 0);
+	}
+
 private:
 	C3D_FVec origin;
 	C3D_FVec lowerLeftCorner;
 	C3D_FVec horizontal;
 	C3D_FVec vertical;
+	float shift;
 };
 
-static DVLB_s* vshaderDVLB;
-static shaderProgram_s program;
-static s8 spheresUniformLocation;
-static s8 sphereColorsUniformLocation;
-static s8 sphereLightsUniformLocation;
-static s8 randUniformLocation;
-
-static constexpr unsigned int VERTEX_COUNT_W = 150;
-static constexpr unsigned int VERTEX_COUNT_H = 10 * VERTEX_COUNT_W / 6;
-static constexpr unsigned int VERTEX_COUNT = VERTEX_COUNT_W * VERTEX_COUNT_H;
-
-static vertex vertexList[VERTEX_COUNT];
-static u16 vertexIndices[VERTEX_COUNT * 2 + VERTEX_COUNT_H * 2];
-
-static void* vboData;
-static void* iboData;
-
-static C3D_Tex prevFrame;
-
-static void setupFixed(C3D_FVec lookFrom, C3D_FVec lookAt, C3D_FVec up)
+static void setupCam(C3D_FVec lookFrom, C3D_FVec lookAt, C3D_FVec up, float iod)
 {
 	constexpr float VFOV = 90;
-	constexpr float ASPECT_RATIO = 400.0f / 240.0f;
+	constexpr float ASPECT_RATIO = C3D_AspectRatioTop;
 
-	camera cam(lookFrom, lookAt, up, VFOV, ASPECT_RATIO);
+	camera cam(lookFrom, lookAt, up, VFOV, ASPECT_RATIO, iod);
 	cam.setupFixed();
+	cam.setupUniform();
 }
 
 static float rand01()
@@ -102,6 +116,8 @@ static C3D_FVec randvec()
 	while (FVec3_Magnitude(out) > 1.0f);
 
 	return out;
+
+	return FVec4_New(0, 0, 0, 0);
 }
 
 static void setupVertices()
@@ -121,7 +137,7 @@ static void setupVertices()
 
 			v.coords[0] = 2.0f * s - 1.0f;
 			v.coords[1] = 2.0f * t - 1.0f;
-			v.coords[2] = -0.5f;
+			v.coords[2] = -0.05f;
 
 			v.uv[0] = s * (240.0f / 256.0f);
 			v.uv[1] = t * (400.0f / 512.0f);
@@ -168,6 +184,7 @@ static void sceneInit()
 	sphereColorsUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "sphereColors");
 	sphereLightsUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "sphereLights");
 	randUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "rand");
+	shiftUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "shift");
 
 	C3D_AttrInfo* attrInfo = C3D_GetAttrInfo();
 	AttrInfo_Init(attrInfo);
@@ -254,24 +271,28 @@ static u32 getFrameNumColor(unsigned int frameNum)
 int main(int argc, char* argv[])
 {
 	gfxInitDefault();
+	gfxSet3D(true);
 	C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
 
-	C3D_RenderTarget* target = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
-	C3D_RenderTargetSetOutput(target, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
+	C3D_RenderTarget* targetLeft = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
+	C3D_RenderTargetSetOutput(targetLeft, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
+
+	C3D_RenderTarget* targetRight = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
+	C3D_RenderTargetSetOutput(targetRight, GFX_TOP, GFX_RIGHT, DISPLAY_TRANSFER_FLAGS);
 	
-	C3D_TexInit(&prevFrame, 256, 512, GPU_RGBA8);
-	C3D_TexBind(0, &prevFrame);
+	C3D_TexInit(&prevFrameLeft, 256, 512, GPU_RGBA8);
+
+	C3D_TexInit(&prevFrameRight, 256, 512, GPU_RGBA8);
 
 	sceneInit();
 
 	C3D_FVec lookFrom = FVec3_New(0, 0.6125f, 0);
 	C3D_FVec lookAt = FVec3_New(0, 0, -1.0f);
 	C3D_FVec vup = FVec3_New(0, 1.0f, 0);
-	bool dirty = false;
-
-	setupFixed(lookFrom, lookAt, vup);
+	bool dirty = true;
 
 	unsigned int frameNum = 0;
+	float previousIOD = osGet3DSliderState() / 4.0f;
 
 	// Main loop
 	while (aptMainLoop())
@@ -326,11 +347,18 @@ int main(int argc, char* argv[])
 
 		lookFrom = FVec3_Add(lookFrom, diff);
 
+		const float iod = osGet3DSliderState() / 4.0f;
+
+		if (fabsf(iod - previousIOD) > 0.01f)
+		{
+			dirty = true;
+		}
+
 		if (dirty)
 		{
-			setupFixed(lookFrom, lookAt, vup);
-
 			frameNum = 0;
+
+			previousIOD = iod;
 
 			dirty = false;
 		}
@@ -340,26 +368,48 @@ int main(int argc, char* argv[])
 
 		C3D_TexEnvColor(C3D_GetTexEnv(0), getFrameNumColor(frameNum));
 
-		if (C3D_FrameBegin(C3D_FRAME_SYNCDRAW))
+		if (frameNum < 256 && C3D_FrameBegin(C3D_FRAME_SYNCDRAW))
 		{
-			C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0, 0);
-			C3D_FrameDrawOn(target);
+			setupCam(lookFrom, lookAt, vup, -iod);
+			C3D_TexBind(0, &prevFrameLeft);
+			C3D_RenderTargetClear(targetLeft, C3D_CLEAR_ALL, 0, 0);
+			C3D_FrameDrawOn(targetLeft);
 			sceneRender();
+
+			if (iod > 0)
+			{
+				setupCam(lookFrom, lookAt, vup, iod);
+				C3D_TexBind(0, &prevFrameRight);
+				C3D_RenderTargetClear(targetRight, C3D_CLEAR_ALL, 0, 0);
+				C3D_FrameDrawOn(targetRight);
+				sceneRender();
+			}
+
 			C3D_FrameEnd(0);
+
 			C3D_SyncTextureCopy(
-				(u32*)target->frameBuf.colorBuf, GX_BUFFER_DIM((240 * 8 * 4) >> 4, 0),
-				(u32*)prevFrame.data + (512 - 400) * 256, GX_BUFFER_DIM((240 * 8 * 4) >> 4, ((256 - 240) * 8 * 4) >> 4),
+				(u32*)targetLeft->frameBuf.colorBuf, GX_BUFFER_DIM((240 * 8 * 4) >> 4, 0),
+				(u32*)prevFrameLeft.data + (512 - 400) * 256, GX_BUFFER_DIM((240 * 8 * 4) >> 4, ((256 - 240) * 8 * 4) >> 4),
 				240 * 400 * 4, FRAMEBUFFER_TRANSFER_FLAGS
 			);
-		}
 
-		frameNum++;
+			if (iod > 0)
+			{
+				C3D_SyncTextureCopy(
+					(u32*)targetRight->frameBuf.colorBuf, GX_BUFFER_DIM((240 * 8 * 4) >> 4, 0),
+					(u32*)prevFrameRight.data + (512 - 400) * 256, GX_BUFFER_DIM((240 * 8 * 4) >> 4, ((256 - 240) * 8 * 4) >> 4),
+					240 * 400 * 4, FRAMEBUFFER_TRANSFER_FLAGS
+				);
+			}
+
+			frameNum++;
+		}
 	}
 
 	sceneExit();
 
-	C3D_TexDelete(&prevFrame);
-	C3D_RenderTargetDelete(target);
+	C3D_TexDelete(&prevFrameLeft);
+	C3D_RenderTargetDelete(targetLeft);
 
 	C3D_Fini();
 	gfxExit();
