@@ -6,8 +6,6 @@
 .alias tooclose myconst.zzzz
 .alias far myconst.wwww
 .alias noHit myconst2.yyyy
-.alias defaultDist myconst.wxxx
-.alias nearplane myconst2.zzzz
 
 .consti bounceLoopParams(9, 0, 1, 0)
 .consti calcSphereLoopParams(3, 0, 1, 0)
@@ -27,9 +25,6 @@
 
 ; random numbers
 .fvec rand[10]
-
-; stereoscopic 3d shift
-.fvec shift
 
 .in inOrigin v0
 .in inLowerLeftCorner v1
@@ -59,9 +54,6 @@
 	; set initial color to (0, 0, 0)
 	mov r13.xyz, zeros
 
-	; set initial hit location to (far, far, far)
-	mov r15.y, far
-
 	; calculate light bounces
 	for bounceLoopParams
 		; setup random numbers for this iteration
@@ -89,7 +81,7 @@
 		; which only happens when
 		; a ray does not hit any spheres
 		cmp noHit.xyz, lt, lt, r10.xyz
-		;breakc cmp.x
+		; not using breakc. it behaves weird.
 		jmpc cmp.x, labl
 
 		; multiply color by albedo
@@ -103,12 +95,6 @@
 
 		; set r2 to new ray direction
 		call diffuse
-
-		; update distance if not set
-		cmp noHit, le, le, r15.y
-		ifc cmp.x
-			mov r15.y, r4.w
-		.end
 	.end
 
 	labl:
@@ -118,31 +104,9 @@
 
 	; set alpha to 1
 	mov outColor.w, ones
-	
-	; set distance
-	cmp noHit, le, le, r15.y
-	ifc cmp.x
-		; to (0, 0, 0, 0) since there was no hit
-		mov r15, zeros
-	.end
 
-	; clamp r15.y to [nearplane, far]
-	max r15.y, nearplane, r15.y
-	min r15.y, far, r15.y
-
-	; invert ordering for z-depth
-	rcp r15.z, -r15.y
-
-	; multiply distance by shift
-	mul r15.y, shift.x, r15.y
-
-	; outPos = inPos + shift
-	add outPos, inPos, r15
-	
-	; assign uv coordinates
-	mul r15, shift.z, r15
-	mul r15, halfs, r15
-	add outUV, inUV, r15
+	mov outPos, inPos
+	mov outUV, inUV
 
 	end
 .end

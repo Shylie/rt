@@ -26,7 +26,6 @@ static s8 spheresUniformLocation;
 static s8 sphereColorsUniformLocation;
 static s8 sphereLightsUniformLocation;
 static s8 randUniformLocation;
-static s8 shiftUniformLocation;
 
 static constexpr unsigned int VERTEX_COUNT_W = 120;
 static constexpr unsigned int VERTEX_COUNT_H = 10 * VERTEX_COUNT_W / 6;
@@ -38,32 +37,26 @@ static u16 vertexIndices[VERTEX_COUNT * 2 + VERTEX_COUNT_H * 2];
 static void* vboData;
 static void* iboData;
 
-static C3D_Tex prevFrameLeft;
-static C3D_Tex prevFrameRight;
+static C3D_Tex prevFrame;
 
 class camera
 {
 public:
-	camera(const C3D_FVec lookfrom, const C3D_FVec lookat, const C3D_FVec vup, const float vfov, const float aspectRatio, const float iod)
+	camera(const C3D_FVec lookfrom, const C3D_FVec lookat, const C3D_FVec vup, const float vfov, const float aspectRatio)
 	{
 		const float theta = C3D_AngleFromDegrees(vfov);
 		const float h = tanf(theta / 2.0f);
 		const float viewportHeight = 2.0f * h;
 		const float viewportWidth = aspectRatio * viewportHeight;
-		const float screen = FVec3_Distance(lookfrom, lookat) / 2.0f;
-		shift = iod / (-400.0f * screen * viewportWidth);
 
 		const C3D_FVec w = FVec3_Normalize(FVec3_Subtract(lookfrom, lookat));
 		const C3D_FVec u = FVec3_Normalize(FVec3_Cross(vup, w));
 		const C3D_FVec v = FVec3_Cross(w, u);
 
-		origin = FVec3_Add(lookfrom, FVec3_New(-iod / 3.0f, 0, 0));
+		origin = lookfrom;
 		horizontal = FVec3_Scale(u, viewportWidth);
 		vertical = FVec3_Scale(v, viewportHeight);
-		lowerLeftCorner = FVec3_Add(
-			FVec3_Subtract(FVec3_Add(FVec3_Scale(horizontal, -0.5f), FVec3_Scale(vertical, -0.5f)), w),
-			FVec3_New(-iod / 3.0f, 0, 0)
-		);
+		lowerLeftCorner = FVec3_Subtract(FVec3_Add(FVec3_Scale(horizontal, -0.5f), FVec3_Scale(vertical, -0.5f)), w);
 	}
 
 	void setupFixed() const
@@ -76,7 +69,6 @@ public:
 
 	void setupUniform() const
 	{
-		C3D_FVUnifSet(GPU_VERTEX_SHADER, shiftUniformLocation, shift / 200.0f, 240.0f / 256.0f, 400.0f / 512.0f, 0);
 	}
 
 private:
@@ -87,12 +79,12 @@ private:
 	float shift;
 };
 
-static void setupCam(C3D_FVec lookFrom, C3D_FVec lookAt, C3D_FVec up, float iod)
+static void setupCam(C3D_FVec lookFrom, C3D_FVec lookAt, C3D_FVec up)
 {
 	constexpr float VFOV = 90;
 	constexpr float ASPECT_RATIO = C3D_AspectRatioTop;
 
-	camera cam(lookFrom, lookAt, up, VFOV, ASPECT_RATIO, iod);
+	camera cam(lookFrom, lookAt, up, VFOV, ASPECT_RATIO);
 	cam.setupFixed();
 	cam.setupUniform();
 }
@@ -184,7 +176,6 @@ static void sceneInit()
 	sphereColorsUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "sphereColors");
 	sphereLightsUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "sphereLights");
 	randUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "rand");
-	shiftUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "shift");
 
 	C3D_AttrInfo* attrInfo = C3D_GetAttrInfo();
 	AttrInfo_Init(attrInfo);
@@ -271,18 +262,12 @@ static u32 getFrameNumColor(unsigned int frameNum)
 int main(int argc, char* argv[])
 {
 	gfxInitDefault();
-	gfxSet3D(true);
 	C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
 
-	C3D_RenderTarget* targetLeft = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
-	C3D_RenderTargetSetOutput(targetLeft, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
-
-	C3D_RenderTarget* targetRight = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
-	C3D_RenderTargetSetOutput(targetRight, GFX_TOP, GFX_RIGHT, DISPLAY_TRANSFER_FLAGS);
+	C3D_RenderTarget* target = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
+	C3D_RenderTargetSetOutput(target, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
 	
-	C3D_TexInit(&prevFrameLeft, 256, 512, GPU_RGBA8);
-
-	C3D_TexInit(&prevFrameRight, 256, 512, GPU_RGBA8);
+	C3D_TexInit(&prevFrame, 256, 512, GPU_RGBA8);
 
 	sceneInit();
 
@@ -292,7 +277,6 @@ int main(int argc, char* argv[])
 	bool dirty = true;
 
 	unsigned int frameNum = 0;
-	float previousIOD = osGet3DSliderState() / 4.0f;
 
 	// Main loop
 	while (aptMainLoop())
@@ -347,18 +331,9 @@ int main(int argc, char* argv[])
 
 		lookFrom = FVec3_Add(lookFrom, diff);
 
-		const float iod = osGet3DSliderState() / 4.0f;
-
-		if (fabsf(iod - previousIOD) > 0.01f)
-		{
-			dirty = true;
-		}
-
 		if (dirty)
 		{
 			frameNum = 0;
-
-			previousIOD = iod;
 
 			dirty = false;
 		}
@@ -370,37 +345,19 @@ int main(int argc, char* argv[])
 
 		if (frameNum < 256 && C3D_FrameBegin(C3D_FRAME_SYNCDRAW))
 		{
-			setupCam(lookFrom, lookAt, vup, -iod);
-			C3D_TexBind(0, &prevFrameLeft);
-			C3D_RenderTargetClear(targetLeft, C3D_CLEAR_ALL, 0, 0);
-			C3D_FrameDrawOn(targetLeft);
+			setupCam(lookFrom, lookAt, vup);
+			C3D_TexBind(0, &prevFrame);
+			C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0, 0);
+			C3D_FrameDrawOn(target);
 			sceneRender();
-
-			if (iod > 0)
-			{
-				setupCam(lookFrom, lookAt, vup, iod);
-				C3D_TexBind(0, &prevFrameRight);
-				C3D_RenderTargetClear(targetRight, C3D_CLEAR_ALL, 0, 0);
-				C3D_FrameDrawOn(targetRight);
-				sceneRender();
-			}
 
 			C3D_FrameEnd(0);
 
 			C3D_SyncTextureCopy(
-				(u32*)targetLeft->frameBuf.colorBuf, GX_BUFFER_DIM((240 * 8 * 4) >> 4, 0),
-				(u32*)prevFrameLeft.data + (512 - 400) * 256, GX_BUFFER_DIM((240 * 8 * 4) >> 4, ((256 - 240) * 8 * 4) >> 4),
+				(u32*)target->frameBuf.colorBuf, GX_BUFFER_DIM((240 * 8 * 4) >> 4, 0),
+				(u32*)prevFrame.data + (512 - 400) * 256, GX_BUFFER_DIM((240 * 8 * 4) >> 4, ((256 - 240) * 8 * 4) >> 4),
 				240 * 400 * 4, FRAMEBUFFER_TRANSFER_FLAGS
 			);
-
-			if (iod > 0)
-			{
-				C3D_SyncTextureCopy(
-					(u32*)targetRight->frameBuf.colorBuf, GX_BUFFER_DIM((240 * 8 * 4) >> 4, 0),
-					(u32*)prevFrameRight.data + (512 - 400) * 256, GX_BUFFER_DIM((240 * 8 * 4) >> 4, ((256 - 240) * 8 * 4) >> 4),
-					240 * 400 * 4, FRAMEBUFFER_TRANSFER_FLAGS
-				);
-			}
 
 			frameNum++;
 		}
@@ -408,8 +365,8 @@ int main(int argc, char* argv[])
 
 	sceneExit();
 
-	C3D_TexDelete(&prevFrameLeft);
-	C3D_RenderTargetDelete(targetLeft);
+	C3D_TexDelete(&prevFrame);
+	C3D_RenderTargetDelete(target);
 
 	C3D_Fini();
 	gfxExit();
