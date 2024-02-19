@@ -18,6 +18,7 @@ struct vertex
 	float st[2];
 	float coords[3];
 	float uv[2];
+	float rand[4];
 };
 
 static DVLB_s* vshaderDVLB;
@@ -27,12 +28,13 @@ static s8 sphereColorsUniformLocation;
 static s8 sphereLightsUniformLocation;
 static s8 randUniformLocation;
 
-static constexpr unsigned int VERTEX_COUNT_W = 120;
+static constexpr unsigned int VERTEX_COUNT_W = 150;
 static constexpr unsigned int VERTEX_COUNT_H = 10 * VERTEX_COUNT_W / 6;
 static constexpr unsigned int VERTEX_COUNT = VERTEX_COUNT_W * VERTEX_COUNT_H;
+static constexpr unsigned int INDICES_COUNT = (VERTEX_COUNT * 2 + VERTEX_COUNT_H * 2);
 
 static vertex vertexList[VERTEX_COUNT];
-static u16 vertexIndices[VERTEX_COUNT * 2 + VERTEX_COUNT_H * 2];
+static u16 vertexIndices[INDICES_COUNT];
 
 static void* vboData;
 static void* iboData;
@@ -108,8 +110,6 @@ static C3D_FVec randvec()
 	while (FVec3_Magnitude(out) > 1.0f);
 
 	return out;
-
-	return FVec4_New(0, 0, 0, 0);
 }
 
 static void setupVertices()
@@ -141,11 +141,19 @@ static void setupVertices()
 
 static void setupRandom()
 {
-	constexpr int NUM_RAND = 10;
+	constexpr int NUM_RAND = 20;
 	C3D_FVec* randPtr = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, randUniformLocation, NUM_RAND);
 	for (int i = 0; i < NUM_RAND; i++)
 	{
 		randPtr[i] = randvec();
+	}
+
+	for (int i = 0; i < VERTEX_COUNT; i++)
+	{
+		vertex& v = static_cast<vertex*>(vboData)[i];
+
+		const C3D_FVec r = randvec();
+		memcpy(v.rand, r.c, sizeof(r.c));
 	}
 }
 
@@ -186,13 +194,14 @@ static void sceneInit()
 	AttrInfo_AddLoader(attrInfo, 4, GPU_FLOAT, 2);
 	AttrInfo_AddLoader(attrInfo, 5, GPU_FLOAT, 3);
 	AttrInfo_AddLoader(attrInfo, 6, GPU_FLOAT, 2);
+	AttrInfo_AddLoader(attrInfo, 7, GPU_FLOAT, 4);
 
 	iboData = linearAlloc(sizeof(vertexIndices));
 	memcpy(iboData, vertexIndices, sizeof(vertexIndices));
 
 	C3D_BufInfo* bufInfo = C3D_GetBufInfo();
 	BufInfo_Init(bufInfo);
-	BufInfo_Add(bufInfo, vboData, sizeof(vertex), 3, 0x654);
+	BufInfo_Add(bufInfo, vboData, sizeof(vertex), 4, 0x7654);
 
 	C3D_TexEnv* env = C3D_GetTexEnv(0);
 	C3D_TexEnvInit(env);
@@ -222,7 +231,7 @@ static void sceneInit()
 
 static void sceneRender()
 {
-	C3D_DrawElements(GPU_TRIANGLE_STRIP, VERTEX_COUNT * 2 + VERTEX_COUNT_H * 2, C3D_UNSIGNED_SHORT, iboData);
+	C3D_DrawElements(GPU_TRIANGLE_STRIP, INDICES_COUNT, C3D_UNSIGNED_SHORT, iboData);
 }
 
 static void sceneExit()

@@ -1,13 +1,14 @@
 .constf myconst(0.0, 1.0, 0.001, 1000.0)
-.constf myconst2(0.5, 999.0, 1.1, 0.0)
+.constf myconst2(0.5, 999.0, 1.1, 2.0)
 .alias zeros myconst.xxxx
 .alias halfs myconst2.xxxx
 .alias ones myconst.yyyy
+.alias twos myconst2.wwww
 .alias tooclose myconst.zzzz
 .alias far myconst.wwww
 .alias noHit myconst2.yyyy
 
-.consti bounceLoopParams(9, 0, 1, 0)
+.consti bounceLoopParams(19, 0, 1, 0)
 .consti calcSphereLoopParams(3, 0, 1, 0)
 
 .setb b0 true
@@ -24,7 +25,7 @@
 .fvec sphereLights[4]
 
 ; random numbers
-.fvec rand[10]
+.fvec rand[20]
 
 .in inOrigin v0
 .in inLowerLeftCorner v1
@@ -33,6 +34,7 @@
 .in inST v4
 .in inPos v5
 .in inUV v6
+.in inRand v7
 
 .out outPos position
 .out outUV texcoord0
@@ -57,7 +59,10 @@
 	; calculate light bounces
 	for bounceLoopParams
 		; setup random numbers for this iteration
-		mov r11, rand[aL]
+		mul r11, rand[aL], inRand
+		dp3 r6.x, r11, r11
+		rsq r6.x, r6.x
+		mul r11.xyz, r6.xxx, r11.xyz
 
 		; reset max ray distance
 		mov r4.w, far
@@ -94,7 +99,7 @@
 		mov r1.xyz, r5.xyz
 
 		; set r2 to new ray direction
-		call diffuse
+		call metallic
 	.end
 
 	labl:
@@ -133,7 +138,6 @@
 ; Temporaries
 ; -----------
 ;   r5.xyz:   new origin
-;   r6.xyz:   new direction
 ;   r7.xyz:   hit normal
 ;   r8.xyzw:  used for calculations
 ;   r9.xyzw:  used for calculations
@@ -231,4 +235,12 @@
 
 .proc diffuse
 	add r2.xyz, r7.xyz, r11.xyz
+.end
+
+.proc metallic
+	dp3 r6.xyz, r2, r7
+	mul r6.xyz, twos, r6.xyz
+	mad r2.xyz, -r6.xyz, r7.xyz, r2.xyz
+	; add a bit of random "fuzziness" to the metal?
+	mad r2.xyz, r11.xyz, r11.w, r2.xyz
 .end
