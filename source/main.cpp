@@ -51,14 +51,15 @@ public:
 		const float viewportHeight = 2.0f * h;
 		const float viewportWidth = aspectRatio * viewportHeight;
 
-		const C3D_FVec w = FVec3_Normalize(FVec3_Subtract(lookfrom, lookat));
+		const C3D_FVec diff = FVec3_Subtract(lookfrom, lookat);
+		const C3D_FVec w = FVec3_Normalize(diff);
 		const C3D_FVec u = FVec3_Normalize(FVec3_Cross(vup, w));
 		const C3D_FVec v = FVec3_Cross(w, u);
 
 		origin = lookfrom;
 		horizontal = FVec3_Scale(u, viewportWidth);
 		vertical = FVec3_Scale(v, viewportHeight);
-		lowerLeftCorner = FVec3_Subtract(FVec3_Add(FVec3_Scale(horizontal, -0.5f), FVec3_Scale(vertical, -0.5f)), w);
+		lowerLeftCorner = FVec3_Subtract(FVec3_Add(FVec3_Scale(horizontal, -0.5f), FVec3_Scale(vertical, -0.5f)), diff);
 	}
 
 	void setupFixed() const
@@ -78,7 +79,6 @@ private:
 	C3D_FVec lowerLeftCorner;
 	C3D_FVec horizontal;
 	C3D_FVec vertical;
-	float shift;
 };
 
 static void setupCam(C3D_FVec lookFrom, C3D_FVec lookAt, C3D_FVec up)
