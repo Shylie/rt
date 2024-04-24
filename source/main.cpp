@@ -18,7 +18,6 @@ struct vertex
 	float st[2];
 	float coords[3];
 	float uv[2];
-	float rand[4];
 };
 
 static DVLB_s* vshaderDVLB;
@@ -27,6 +26,7 @@ static s8 spheresUniformLocation;
 static s8 sphereColorsUniformLocation;
 static s8 sphereLightsUniformLocation;
 static s8 randUniformLocation;
+static s8 calcSphereLoopParamsUniformLocation;
 
 static constexpr unsigned int VERTEX_COUNT_W = 150;
 static constexpr unsigned int VERTEX_COUNT_H = 10 * VERTEX_COUNT_W / 6;
@@ -99,7 +99,6 @@ static float rand01()
 static C3D_FVec randvec()
 {
 	C3D_FVec out;
-	out.w = rand01();
 
 	do
 	{
@@ -108,6 +107,9 @@ static C3D_FVec randvec()
 		out.z = rand01() * 2 - 1;
 	}
 	while (FVec3_Magnitude(out) > 1.0f);
+
+	out = FVec3_Normalize(out);
+	out.w = rand01();
 
 	return out;
 }
@@ -123,7 +125,7 @@ static void setupVertices()
 			const float s = static_cast<float>(x) / VERTEX_COUNT_W;
 			const float t = static_cast<float>(y) / VERTEX_COUNT_H;
 
-			// swapped due to 3DS screen orientation
+			// s and t are swapped due to 3DS screen orientation
 			v.st[0] = t + rand01() / VERTEX_COUNT_W;
 			v.st[1] = s + rand01() / VERTEX_COUNT_H;
 
@@ -141,19 +143,11 @@ static void setupVertices()
 
 static void setupRandom()
 {
-	constexpr int NUM_RAND = 20;
+	constexpr int NUM_RAND = 15; // needs to be the same as rand array length in vshader.v.pica
 	C3D_FVec* randPtr = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, randUniformLocation, NUM_RAND);
 	for (int i = 0; i < NUM_RAND; i++)
 	{
 		randPtr[i] = randvec();
-	}
-
-	for (int i = 0; i < VERTEX_COUNT; i++)
-	{
-		vertex& v = static_cast<vertex*>(vboData)[i];
-
-		const C3D_FVec r = randvec();
-		memcpy(v.rand, r.c, sizeof(r.c));
 	}
 }
 
@@ -184,6 +178,7 @@ static void sceneInit()
 	sphereColorsUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "sphereColors");
 	sphereLightsUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "sphereLights");
 	randUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "rand");
+	calcSphereLoopParamsUniformLocation = shaderInstanceGetUniformLocation(program.vertexShader, "calcSphereLoopParams");
 
 	C3D_AttrInfo* attrInfo = C3D_GetAttrInfo();
 	AttrInfo_Init(attrInfo);
@@ -194,14 +189,13 @@ static void sceneInit()
 	AttrInfo_AddLoader(attrInfo, 4, GPU_FLOAT, 2);
 	AttrInfo_AddLoader(attrInfo, 5, GPU_FLOAT, 3);
 	AttrInfo_AddLoader(attrInfo, 6, GPU_FLOAT, 2);
-	AttrInfo_AddLoader(attrInfo, 7, GPU_FLOAT, 4);
 
 	iboData = linearAlloc(sizeof(vertexIndices));
 	memcpy(iboData, vertexIndices, sizeof(vertexIndices));
 
 	C3D_BufInfo* bufInfo = C3D_GetBufInfo();
 	BufInfo_Init(bufInfo);
-	BufInfo_Add(bufInfo, vboData, sizeof(vertex), 4, 0x7654);
+	BufInfo_Add(bufInfo, vboData, sizeof(vertex), 3, 0x654);
 
 	C3D_TexEnv* env = C3D_GetTexEnv(0);
 	C3D_TexEnvInit(env);
@@ -210,23 +204,25 @@ static void sceneInit()
 	C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
 
 	constexpr u16 NUM_SPHERES = 4;
+	C3D_IVUnifSet(GPU_VERTEX_SHADER, calcSphereLoopParamsUniformLocation, NUM_SPHERES - 1, 0, 1, 0);
+
 	C3D_FVec* spheres = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, spheresUniformLocation, NUM_SPHERES);
-	spheres[0] = FVec4_New(0.0f, -100.5f, -1.0f, 100.0f);
-	spheres[1] = FVec4_New(0.6f, 0.0f, -1.0f, 0.5f);
-	spheres[2] = FVec4_New(-0.6f, 0.0f, -1.0f, 0.5f);
-	spheres[3] = FVec4_New(0.0f, 10.0f, -1.0f, 9.0f);
+	spheres[0] = FVec4_New(0.0f, -100.5f, 0.0f, 100.0f);
+	spheres[1] = FVec4_New(0.6f, 0.0f, 0.0f, 0.5f);
+	spheres[2] = FVec4_New(-0.6f, 0.0f, 0.0f, 0.5f);
+	spheres[3] = FVec4_New(0.0f, 10.0f, 0.0f, 9.0f);
 
 	C3D_FVec* sphereColors = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, sphereColorsUniformLocation, NUM_SPHERES);
-	sphereColors[0] = FVec3_New(0.9f, 0.3f, 0.3f);
-	sphereColors[1] = FVec3_New(0.3f, 0.9f, 0.3f);
-	sphereColors[2] = FVec3_New(0.3f, 0.3f, 0.9f);
-	sphereColors[3] = FVec3_New(1.0f, 1.0f, 1.0f);
+	sphereColors[0] = FVec4_New(0.9f, 0.3f, 0.3f,  0);
+	sphereColors[1] = FVec4_New(0.3f, 0.9f, 0.3f,  1);
+	sphereColors[2] = FVec4_New(0.3f, 0.3f, 0.9f,  0);
+	sphereColors[3] = FVec4_New(1.0f, 1.0f, 1.0f, -1);
 
 	C3D_FVec* sphereLights = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, sphereLightsUniformLocation, NUM_SPHERES);
-	sphereLights[0] = FVec3_New(0.0f, 0.0f, 0.0f);
-	sphereLights[1] = FVec3_New(0.0f, 0.0f, 0.0f);
-	sphereLights[2] = FVec3_New(0.0f, 0.0f, 0.0f);
-	sphereLights[3] = FVec3_New(1.0f, 1.0f, 1.0f);
+	sphereLights[0] = FVec4_New(0.0f, 0.0f, 0.0f, 0);
+	sphereLights[1] = FVec4_New(0.0f, 0.0f, 0.0f, 0.2f);
+	sphereLights[2] = FVec4_New(0.0f, 0.0f, 0.0f, 0);
+	sphereLights[3] = FVec4_New(0.5f, 0.5f, 0.5f, 0);
 }
 
 static void sceneRender()
@@ -280,8 +276,8 @@ int main(int argc, char* argv[])
 
 	sceneInit();
 
-	C3D_FVec lookFrom = FVec3_New(0, 0.6125f, 0);
-	C3D_FVec lookAt = FVec3_New(0, 0, -1.0f);
+	C3D_FVec lookFrom = FVec3_New(0, 0.0f, 1.0f);
+	C3D_FVec lookAt = FVec3_New(0, 0, 0.0f);
 	C3D_FVec vup = FVec3_New(0, 1.0f, 0);
 	bool dirty = true;
 
@@ -352,7 +348,7 @@ int main(int argc, char* argv[])
 
 		C3D_TexEnvColor(C3D_GetTexEnv(0), getFrameNumColor(frameNum));
 
-		if (frameNum < 256 && C3D_FrameBegin(C3D_FRAME_SYNCDRAW))
+		if (frameNum < 96 && C3D_FrameBegin(C3D_FRAME_SYNCDRAW))
 		{
 			setupCam(lookFrom, lookAt, vup);
 			C3D_TexBind(0, &prevFrame);

@@ -7,25 +7,31 @@
 .alias tooclose myconst.zzzz
 .alias far myconst.wwww
 .alias noHit myconst2.yyyy
+.alias diffuseID myconst.xxxx
+.alias metallicID myconst.yyyy
 
-.consti bounceLoopParams(19, 0, 1, 0)
-.consti calcSphereLoopParams(3, 0, 1, 0)
+.consti bounceLoopParams(14, 0, 1, 0)
+
+; (NUM_SPHERES, 0, 1, 0)
+.ivec calcSphereLoopParams
 
 .setb b0 true
 .alias true b0
 
 ; xyz center (in world space)
 ; w radius (in world space)
-.fvec spheres[4]
+.fvec spheres[25]
 
-; material albedo
-.fvec sphereColors[4]
+; material albedo (xyz)
+; material id     (w)
+.fvec sphereColors[25]
 
-; material emitted light
-.fvec sphereLights[4]
+; material emitted light (xyz)
+; extra material params  (w)
+.fvec sphereLights[25]
 
 ; random numbers
-.fvec rand[20]
+.fvec rand[15]
 
 .in inOrigin v0
 .in inLowerLeftCorner v1
@@ -34,7 +40,6 @@
 .in inST v4
 .in inPos v5
 .in inUV v6
-.in inRand v7
 
 .out outPos position
 .out outUV texcoord0
@@ -59,10 +64,7 @@
 	; calculate light bounces
 	for bounceLoopParams
 		; setup random numbers for this iteration
-		mul r11, rand[aL], inRand
-		dp3 r6.x, r11, r11
-		rsq r6.x, r6.x
-		mul r11.xyz, r6.xxx, r11.xyz
+		mov r11, rand[aL]
 
 		; reset max ray distance
 		mov r4.w, far
@@ -99,7 +101,22 @@
 		mov r1.xyz, r5.xyz
 
 		; set r2 to new ray direction
-		call metallic
+		; try diffuse material
+		cmp diffuseID.w, eq, eq, r10.w
+		callc cmp.x, diffuse
+		jmpc cmp.x, materialFound
+
+		; try metallic material
+		cmp metallicID.w, eq, eq, r10.w
+		callc cmp.x, metallic
+		jmpc cmp.x, materialFound
+
+		; material doesn't reflect light
+		; used mostly for light-emitting objects
+		jmpu true, labl
+
+		materialFound:
+		nop
 	.end
 
 	labl:
@@ -118,6 +135,7 @@
 
 ; Calculate Sphere Intersection
 ; -----------------------------
+;   Performs a ray-sphere intersection test.
 ;
 ; Inputs
 ; ------
@@ -133,7 +151,9 @@
 ; -------
 ;   r4.w:     new min distance
 ;   r10.xyz:  albedo
+;   r10.w:    material id
 ;   r12.xyz:  light emitted
+;   r12.w:    extra material info
 ;
 ; Temporaries
 ; -----------
@@ -222,25 +242,48 @@
 	rcp r3.w, r3.w
 	mul r7.xyz, r7.xyz, r3.w
 
-	; set albedo
-	mov r10.xyz, sphereColors[aL].xyz
+	; set albedo and material type
+	mov r10.xyzw, sphereColors[aL].xyzw
 
-	; set light emitted
-	mov r12.xyz, sphereLights[aL].xyz
+	; set light emitted and extra material info
+	mov r12.xyzw, sphereLights[aL].xyzw
 
 	; early exit label
 	calcSphereExit:
 	nop
 .end
 
+; All Materials
+; -------------
+;   Calculates the new ray direction for a given material.
+;
+; Inputs
+; ------
+;   r1.xyz:   ray origin
+;   r2.xyz:   ray direction
+;   r3.xyz:   sphere origin
+;	r3.w:     sphere radius
+;   r4.w:     min distance
+;   r11.xyz:  random unit vector
+;   r11.w:    random number
+;
+; Outputs
+; -------
+;   r2.xyz:   new ray direction
+
+
+; Diffuse Material
+; ----------------
 .proc diffuse
 	add r2.xyz, r7.xyz, r11.xyz
 .end
 
+; Metallic Material
+; -----------------
 .proc metallic
 	dp3 r6.xyz, r2, r7
 	mul r6.xyz, twos, r6.xyz
 	mad r2.xyz, -r6.xyz, r7.xyz, r2.xyz
-	; add a bit of random "fuzziness" to the metal?
-	mad r2.xyz, r11.xyz, r11.w, r2.xyz
+	; add a bit of random "fuzziness" to the metal
+	mad r2.xyz, r11.xyz, r12.w, r2.xyz
 .end
