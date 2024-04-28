@@ -1,5 +1,6 @@
 .constf myconst(0.0, 1.0, 0.001, 1000.0)
 .constf myconst2(0.5, 999.0, 1.1, 2.0)
+.constf myconst3(0.5, 0.0, 0.0, 0.0)
 .alias zeros myconst.xxxx
 .alias halfs myconst2.xxxx
 .alias ones myconst.yyyy
@@ -7,10 +8,14 @@
 .alias tooclose myconst.zzzz
 .alias far myconst.wwww
 .alias noHit myconst2.yyyy
+.alias samplesRCP myconst3.xxxx
+
 .alias diffuseID myconst.xxxx
 .alias metallicID myconst.yyyy
+.alias dielectricID myconst2.wwww
 
-.consti bounceLoopParams(14, 0, 1, 0)
+.consti sampleLoopParams(4, 0, 1, 0)
+.consti bounceLoopParams(9, 0, 1, 0)
 
 ; (NUM_SPHERES, 0, 1, 0)
 .ivec calcSphereLoopParams
@@ -31,7 +36,8 @@
 .fvec sphereLights[25]
 
 ; random numbers
-.fvec rand[15]
+.fvec rand[10]
+.fvec sampleRand[5]
 
 .in inOrigin v0
 .in inLowerLeftCorner v1
@@ -40,89 +46,109 @@
 .in inST v4
 .in inPos v5
 .in inUV v6
+.in inRand v7
 
 .out outPos position
 .out outUV texcoord0
 .out outColor color
 
 .proc main
-	; r1 = inOrigin
-	mov r1, inOrigin
+	mov r15.xyz, zeros
 
-	; r2 = inDirection
-	mov r2.xyz, inLowerLeftCorner
-	mov r3.xy, inST.xy
-	mad r2.xyz, inHorizontal, r3.x, r2.xyz
-	mad r2.xyz, inVertical, r3.y, r2.xyz
+	for sampleLoopParams
+		; r1 = inOrigin
+		mov r1, inOrigin
 
-	; set initial color multiplier to (1, 1, 1)
-	mov r4.xyz, ones
+		; r2 = inDirection
+		mov r2.xyz, inLowerLeftCorner
+		mov r3.xy, inST.xy
+		mad r2.xyz, inHorizontal, r3.x, r2.xyz
+		mad r2.xyz, inVertical, r3.y, r2.xyz
 
-	; set initial color to (0, 0, 0)
-	mov r13.xyz, zeros
+		; set initial color multiplier to (1, 1, 1)
+		mov r4.xyz, ones
 
-	; calculate light bounces
-	for bounceLoopParams
-		; setup random numbers for this iteration
-		mov r11, rand[aL]
+		; set initial color to (0, 0, 0)
+		mov r13.xyz, zeros
 
-		; reset max ray distance
-		mov r4.w, far
+		mov r14.xyz, sampleRand[aL].xyz
 
-		; set albedo to a large number for sphere hit check
-		mov r10.xyz, far
+		; calculate light bounces
+		for bounceLoopParams
+			; setup random numbers for this iteration
+			mov r11, rand[aL]
+			add r11.xyz, r11.xyz, r14.xyz
+			add r11.xyz, r11.xyz, inRand.xyz
+			dp3 r14.w, r11.xyz, r11.xyz
+			rsq r14.w, r14.w
+			mul r11.xyz, r11.xyz, r14.w
 
-		; for each sphere
-		for calcSphereLoopParams
-			; r3 = spheres[i]
-			mov r3, spheres[aL]
+			; reset max ray distance
+			mov r4.w, far
+
+			; set albedo to a large number for sphere hit check
+			mov r10.xyz, far
+
+			; for each sphere
+			for calcSphereLoopParams
+				; r3 = spheres[i]
+				mov r3, spheres[aL]
 			
-			; do calculation
-			call calcSphere
+				; do calculation
+				call calcSphere
+			.end
+
+			; check if noHit < albedo
+			; and exit early if true
+			; as albedo has not been set
+			; after the initial set
+			; which only happens when
+			; a ray does not hit any spheres
+			cmp noHit.xyz, lt, lt, r10.xyz
+			; not using breakc. it behaves weird.
+			jmpc cmp.x, labl
+
+			; multiply color by albedo
+			mul r4.xyz, r4.xyz, r10.xyz
+
+			; add emitted light
+			mad r13.xyz, r4.xyz, r12.xyz, r13.xyz
+
+			; set r1 to new ray origin
+			mov r1.xyz, r5.xyz
+
+			; set r2 to new ray direction
+			; try diffuse material
+			cmp diffuseID.w, eq, eq, r10.w
+			callc cmp.x, diffuse
+			jmpc cmp.x, materialFound
+
+			; try metallic material
+			cmp metallicID.w, eq, eq, r10.w
+			callc cmp.x, metallic
+			jmpc cmp.x, materialFound
+
+			; try dielectric material
+			cmp dielectricID.w, eq, eq, r10.w
+			callc cmp.x, dielectric
+			jmpc cmp.x, materialFound
+
+			; material doesn't reflect light
+			; used mostly for light-emitting objects
+			jmpu true, labl
+
+			materialFound:
+			nop
 		.end
 
-		; check if noHit < albedo
-		; and exit early if true
-		; as albedo has not been set
-		; after the initial set
-		; which only happens when
-		; a ray does not hit any spheres
-		cmp noHit.xyz, lt, lt, r10.xyz
-		; not using breakc. it behaves weird.
-		jmpc cmp.x, labl
+		labl:
 
-		; multiply color by albedo
-		mul r4.xyz, r4.xyz, r10.xyz
-
-		; add emitted light
-		mad r13.xyz, r4.xyz, r12.xyz, r13.xyz
-
-		; set r1 to new ray origin
-		mov r1.xyz, r5.xyz
-
-		; set r2 to new ray direction
-		; try diffuse material
-		cmp diffuseID.w, eq, eq, r10.w
-		callc cmp.x, diffuse
-		jmpc cmp.x, materialFound
-
-		; try metallic material
-		cmp metallicID.w, eq, eq, r10.w
-		callc cmp.x, metallic
-		jmpc cmp.x, materialFound
-
-		; material doesn't reflect light
-		; used mostly for light-emitting objects
-		jmpu true, labl
-
-		materialFound:
-		nop
+		; add final color to output
+		add r15.xyz, r13.xyz, r15.xyz
 	.end
 
-	labl:
-
-	; copy final color to output
-	mov outColor.xyz, r13.xyz
+	; divide by sample count
+	mul outColor.xyz, samplesRCP, r15.xyz
 
 	; set alpha to 1
 	mov outColor.w, ones
@@ -133,6 +159,7 @@
 	end
 .end
 
+; -----------------------------
 ; Calculate Sphere Intersection
 ; -----------------------------
 ;   Performs a ray-sphere intersection test.
@@ -159,6 +186,7 @@
 ; -----------
 ;   r5.xyz:   new origin
 ;   r7.xyz:   hit normal
+;   r7.w:     ray is outside sphere (1) or inside sphere (0)
 ;   r8.xyzw:  used for calculations
 ;   r9.xyzw:  used for calculations
 
@@ -253,8 +281,9 @@
 	nop
 .end
 
-; All Materials
-; -------------
+; ---------
+; Materials
+; ---------
 ;   Calculates the new ray direction for a given material.
 ;
 ; Inputs
@@ -274,16 +303,26 @@
 
 ; Diffuse Material
 ; ----------------
+
 .proc diffuse
 	add r2.xyz, r7.xyz, r11.xyz
 .end
 
 ; Metallic Material
 ; -----------------
+
 .proc metallic
 	dp3 r6.xyz, r2, r7
 	mul r6.xyz, twos, r6.xyz
 	mad r2.xyz, -r6.xyz, r7.xyz, r2.xyz
 	; add a bit of random "fuzziness" to the metal
 	mad r2.xyz, r11.xyz, r12.w, r2.xyz
+.end
+
+; Dielectric Material
+; -------------------
+
+.proc dielectric
+	; currently diffuse material, implement fr later
+	add r2.xyz, r7.xyz, r11.xyz
 .end
